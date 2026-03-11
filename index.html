@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Smörgås Kaffet – Ventas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Bootstrap 5 para UI -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    /* Variables y estilos base */
+    :root{ --bg-sky:#9fd0ff; --panel-yellow:#fff59d; --primary-blue:#1e88e5; --warning-orange:#f4a261; --danger-red:#e85d5d; --text-dark:#2b2d2f; --shadow:0 8px 24px rgba(0,0,0,.12);}
+    body{ background:var(--bg-sky); color:var(--text-dark); }
+    .board{ max-width:980px; margin:48px auto; background:#fff; border-radius:18px; overflow:hidden; box-shadow:var(--shadow); border:2px solid rgba(0,0,0,.06);}
+    .board__header{ background:var(--panel-yellow); padding:22px 24px 10px; text-align:center; }
+    .board__title{ font-weight:700; letter-spacing:.5px; margin:0 0 10px; }
+    .btn-primary{ background:var(--primary-blue); border-color:var(--primary-blue); font-weight:600; border-radius:10px; }
+    .btn-edit{ background:var(--warning-orange); border:none; color:#1f2328; font-weight:700; padding:.45rem .8rem; border-radius:8px;}
+    .btn-del{ background:var(--danger-red); border:none; color:#fff; font-weight:700; padding:.45rem .8rem; border-radius:8px;}
+    .badge-serv{ font-weight:600; background:#eef6ff; border:1px solid #d7e9ff; color:#3674b6; border-radius:999px; padding:6px 10px; }
+    .board__body{ padding:22px 24px 28px; background:#fff; }
+
+    /* Estilo del modal coherente con la UI */
+    .modal-header{ background:var(--panel-yellow); border-bottom:1px solid rgba(0,0,0,.08); }
+    .modal-title{ font-weight:700; color:#2b2d2f; }
+    .btn-cancelar{ background:#e0e0e0; border:none; color:#2b2d2f; }
+    .btn-confirmar{ background:var(--danger-red); border:none; }
+    .modal-content{ border-radius:16px; box-shadow:var(--shadow); }
+  </style>
+</head>
+<body>
+
+<!-- Mensajes flash (éxito/error) -->
+<div class="container mt-3" style="max-width:980px;">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+</div>
+
+<section class="board">
+  <div class="board__header">
+    <h2 class="board__title">Smörgås Kaffet</h2>
+    <!-- Usuario logueado y rol (enviados desde app.py) -->
+    <div class="d-flex justify-content-center align-items-center mb-2">
+      <span class="text-muted">
+        Usuario: <strong>{{ usuario }}</strong> — Rol: <strong>{{ rol }}</strong>
+      </span>
+      <a class="btn btn-sm btn-outline-dark ms-3" href="{{ url_for('logout') }}">Cerrar sesión</a>
+    </div>
+    <!-- Ir a tomar nueva cuenta -->
+    <a class="btn btn-primary px-4" href="{{ url_for('pagina2') }}">Añadir Cuenta</a>
+    {% if rol == 'admin' %}
+     <a class="btn btn-primary px-4" href="{{ url_for('usuarios_list') }}">Administrar usuarios</a>
+    {% endif %}
+  </div>
+
+  <div class="board__body">
+    <div class="table-responsive">
+      <!-- Tabla de cuentas (ventas) -->
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            <th>Folio</th><th>Mesa</th><th>Importe</th><th>Cantidad</th><th>Servicio</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for v in ventas %}
+          <tr>
+            <!-- Campos del SELECT en app.py -->
+            <td>#{{ v['Folio'] }}</td>
+            <td>{{ v['ID_Mesa'] }}</td>
+            <td>${{ '%.2f'|format(v['Importe_Total']) }}</td>
+            <td>{{ v['Cantidad_Total'] or 0 }}</td>
+            <td>
+              <!-- Badge de modo entrega: mostrado según ID_Modo_Entrega -->
+              <span class="badge-serv">{{ 'Llevar' if v['ID_Modo_Entrega']|string=='1' else 'Comedor' }}</span>
+            </td>
+            <td>
+              <div class="d-flex gap-2 flex-wrap">
+                <!-- Cargar editor inline de productos con fetch (sin modal) -->
+                <button type="button" class="btn btn-info btn-sm text-white detalle-btn" data-folio="{{ v['Folio'] }}">
+                  Ver / Editar productos
+                </button>
+
+                <!-- Abrir modal para editar cabecera (mesa / modo) -->
+                <button type="button" class="btn btn-edit btn-sm edit-btn"
+                        data-bs-toggle="modal" data-bs-target="#editModal"
+                        data-folio="{{ v['Folio'] }}"
+                        data-mesa="{{ v['ID_Mesa'] }}"
+                        data-entrega="{{ v['ID_Modo_Entrega'] }}">
+                  Editar cabecera
+                </button>
+
+                <!-- Eliminar cuenta (solo admin) -> ahora con modal propio -->
+                {% if rol == 'admin' %}
+                <button type="button"
+                        class="btn btn-del btn-sm btn-open-del"
+                        data-bs-toggle="modal"
+                        data-bs-target="#confirmDelModal"
+                        data-folio="{{ v['Folio'] }}"
+                        data-action="{{ url_for('delete', folio=v['Folio']) }}">
+                  Eliminar
+                </button>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <!-- Si no hay ventas -->
+          <tr><td colspan="6" class="text-center text-muted py-4">Sin registros.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Aquí se inyecta (via JS) la tabla de detalle para editar cantidades y precios -->
+    <div id="detalleContainer" class="mt-4"></div>
+  </div>
+</section>
+
+<!-- Modal para editar cabecera (mesa/modo) -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form id="editForm" method="POST">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Editar cuenta</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Folio solo lectura -->
+          <div class="mb-2">
+            <label class="form-label">Folio</label>
+            <input type="text" id="editFolio" class="form-control" disabled>
+          </div>
+          <!-- Mesa con validación (100..108) -->
+          <div class="mb-2">
+            <label class="form-label">Mesa</label>
+            <select id="editMesa" name="ID_Mesa" class="form-select" required>
+              {% for m in range(100,109) %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+            </select>
+          </div>
+          <!-- Modo de entrega 1/2 -->
+          <div class="mb-2">
+            <label class="form-label">Modo de entrega</label>
+            <select id="editEntrega" name="ID_Modo_Entrega" class="form-select" required>
+              <option value="1">Llevar</option><option value="2">Comedor</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" type="submit">Guardar</button>
+          <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancelar</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal de confirmación para eliminar folio -->
+<div class="modal fade" id="confirmDelModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Confirmar eliminación</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-0">
+          ¿Seguro que quiere eliminar el folio <strong id="delFolioTxt">#?</strong>?
+          <br><small class="text-muted">Esta acción es permanente.</small>
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-cancelar" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-confirmar" id="btnConfirmDel">Eliminar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- JS Bootstrap -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  // ===== Modal: precargar valores y setear acción /update/<folio> =====
+  document.querySelectorAll(".edit-btn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      editFolio.value = btn.dataset.folio;
+      editMesa.value = btn.dataset.mesa;
+      editEntrega.value = btn.dataset.entrega;
+      editForm.action = "/update/" + btn.dataset.folio;
+    });
+  });
+
+  // ===== Editor inline de productos (sin modal) =====
+  const detalleContainer = document.getElementById("detalleContainer");
+  const QMIN=1, QMAX=50; // límites de cantidad
+
+  // Llama al backend y trae los renglones del folio
+  async function pedirDetalles(folio){
+    const res = await fetch(`/venta/${folio}/detalles`, {headers:{Accept:"application/json"}});
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    return await res.json();
+  }
+
+  // Validar cantidad en inputs (1..50) en tiempo real
+  function clampQtyInput(input){
+    input.addEventListener("input", ()=>{
+      let v = parseInt(input.value,10);
+      if (isNaN(v)) return;
+      if (v<QMIN) input.value = QMIN;
+      if (v>QMAX) input.value = QMAX;
+      actualizarFila(input.closest("tr")); actualizarTotal();
+    });
+    input.addEventListener("blur", ()=>{
+      let v = parseInt(input.value,10);
+      if (isNaN(v) || v<QMIN) input.value = QMIN;
+      if (v>QMAX) input.value = QMAX;
+      actualizarFila(input.closest("tr")); actualizarTotal();
+    });
+  }
+  // Validar precio (0.01..10000)
+  function precioInputHandler(input){
+    input.addEventListener("input", ()=>{
+      let v = parseFloat(input.value);
+      if (!isFinite(v)) return;
+      if (v<0.01) input.value = 0.01;
+      if (v>10000) input.value = 10000;
+      actualizarFila(input.closest("tr")); actualizarTotal();
+    });
+  }
+  // Recalcula subtotal de una fila: cantidad * precio
+  function actualizarFila(tr){
+    const q = parseInt(tr.querySelector(".inp-cant").value)||0;
+    const p = parseFloat(tr.querySelector(".inp-precio").value)||0;
+    const s = q*p;
+    tr.querySelector(".cell-sub").textContent = "$"+s.toFixed(2);
+    tr.dataset.subtotal = s.toFixed(2);
+  }
+  // Recalcula el total (suma de subtotales renderizados)
+  function actualizarTotal(){
+    let tot=0;
+    detalleContainer.querySelectorAll("tbody tr").forEach(tr=>{
+      tot += parseFloat(tr.dataset.subtotal||"0");
+    });
+    const t = detalleContainer.querySelector("#totFolio");
+    if(t) t.textContent = "$"+tot.toFixed(2);
+  }
+  // Pinta la tabla con renglones editables; cada fila tiene botón Guardar (POST /detalle/update/<id>)
+  function renderDetalleInline(folio, items){
+    if(!items || items.length===0){
+      detalleContainer.innerHTML = `<div class="alert alert-warning">El folio #${folio} no tiene productos.</div>`;
+      return;
+    }
+    let rows = items.map((it,i)=>`
+      <tr data-subtotal="${Number(it.Subtotal).toFixed(2)}">
+        <td>${i+1}</td>
+        <td>${it.Nombre_Producto}</td>
+        <td style="width:130px;"><input type="number" min="1" max="50" value="${it.Cantidad}"
+               class="form-control form-control-sm inp-cant" data-id="${it.ID_Detalle}"></td>
+        <td style="width:150px;"><input type="number" step="0.01" min="0.01" max="10000"
+               value="${Number(it.Precio_Unit).toFixed(2)}"
+               class="form-control form-control-sm inp-precio" data-id="${it.ID_Detalle}"></td>
+        <td class="cell-sub">$${Number(it.Subtotal).toFixed(2)}</td>
+        <td style="width:120px;">
+          <button class="btn btn-sm btn-primary btn-guardar" data-id="${it.ID_Detalle}">Guardar</button>
+        </td>
+      </tr>`).join("");
+    const total = items.reduce((a,b)=>a+Number(b.Subtotal||0),0);
+    detalleContainer.innerHTML = `
+      <div class="card"><div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr>
+              <th>#</th><th>Producto</th><th>Cantidad</th><th>Precio</th><th>Subtotal</th><th>Acciones</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+            <tfoot><tr>
+              <td colspan="4" class="text-end fw-bold">Total del folio:</td>
+              <td colspan="2" id="totFolio">$${total.toFixed(2)}</td>
+            </tr></tfoot>
+          </table>
+        </div></div></div>`;
+    // Activar validadores en los inputs recién dibujados
+    detalleContainer.querySelectorAll(".inp-cant").forEach(clampQtyInput);
+    detalleContainer.querySelectorAll(".inp-precio").forEach(precioInputHandler);
+  }
+
+  // Al pulsar "Ver/Editar productos": carga los renglones y renderiza la tabla
+  document.querySelectorAll(".detalle-btn").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const folio = btn.dataset.folio;
+      detalleContainer.innerHTML = `<div class="text-muted">Cargando productos del folio #${folio}...</div>`;
+      try{ renderDetalleInline(folio, await pedirDetalles(folio)); }
+      catch(e){ detalleContainer.innerHTML = `<div class="alert alert-danger">No se pudo cargar: ${e.message}</div>`; }
+    });
+  });
+
+  // ===== Modal de confirmación de eliminación (redirección GET a /delete/<folio>) =====
+  const delModal = document.getElementById('confirmDelModal');
+  const delFolioTxt = document.getElementById('delFolioTxt');
+  const btnConfirmDel = document.getElementById('btnConfirmDel');
+  let delAction = '#';
+
+  delModal.addEventListener('show.bs.modal', (ev)=>{
+    const btn = ev.relatedTarget; // botón .btn-open-del
+    const folio = btn.getAttribute('data-folio');
+    const action = btn.getAttribute('data-action');
+    delFolioTxt.textContent = `#${folio}`;
+    delAction = action;
+  });
+
+  btnConfirmDel.addEventListener('click', ()=>{
+    // Mantiene compat con tu ruta GET /delete/<folio> (sin cambiar app.py)
+    window.location.href = delAction;
+  });
+
+  // ===== Guardar renglón de detalle: POST /detalle/update/<id> =====
+  detalleContainer.addEventListener("click", async (e)=>{
+    if(!e.target.classList.contains("btn-guardar")) return;
+    const id  = e.target.dataset.id;
+    const tr  = e.target.closest("tr");
+    const cant= tr.querySelector(".inp-cant").value;
+    const prec= tr.querySelector(".inp-precio").value;
+    e.target.disabled = true;
+    const fd = new FormData(); fd.append("cantidad", cant); fd.append("precio_unit", prec);
+    const res = await fetch(`/detalle/update/${id}`, { method:"POST", body:fd });
+    const data = await res.json().catch(()=>({ok:false}));
+    e.target.disabled = false;
+    if(!data.ok){ alert(data.msg || "Error al actualizar"); return; }
+    // Si ok, recalcular subtotal y total renderizado
+    actualizarFila(tr); actualizarTotal();
+  });
+</script>
+</body>
+</html>
